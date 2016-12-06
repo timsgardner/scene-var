@@ -49,7 +49,7 @@
   (hook-replace obj :on-destroy ::scene-var #'handle-obj-destroy)
   (swap! name-registry #(put-name-obj % name obj)))
 
-(defn- find-entity [name]
+(defn find-entity [name]
   (-> @name-registry
       (get ::names->objs)
       (get name)))
@@ -63,7 +63,7 @@
     ent))
 
 
-(defn- init-entity [{:keys [name init update] :as init-spec}]
+(defn init-entity [{:keys [name init update] :as init-spec}]
   (-> (or (find-entity name)
           (and init (run-init init name)))
       (as-> ent

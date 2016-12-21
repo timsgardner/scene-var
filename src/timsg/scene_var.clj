@@ -14,18 +14,6 @@
           (str "Zero-argument arity of def, if present, must return a GameObject; instead getting a " (type ent)))))
     ent))
 
-(defn init-entity [{:keys [kw init update] :as init-spec}]
-  (-> (or (find-entity kw)
-          (and init (run-init init kw)))
-      (as-> ent
-            (if update (update ent) ent)
-            (register-name ent kw))))
-
-;; ============================================================
-;; def-entity
-
-;; TODO: support for docs
-
 (s/def ::tail-impl
   (s/cat
     :args (s/and vector? #(#{0 1} (count %)))
@@ -37,10 +25,6 @@
     :tails (s/alt
              :single-arity ::tail-impl
              :n-arities (s/* (s/spec ::tail-impl)))))
-
-(s/fdef def-entity
-  :args ::def-entity-args 
-  :ret any?)
 
 (defn- parse-def-form [args]
   (as/qwik-conform [{:keys [name tails] :as spec} ::def-entity-args args]
@@ -62,8 +46,6 @@
                       :name qualified-name)]
       init-spec)))
 
-
-
 ;; Returns nil if the referenced object is destroyed. Maybe that's not a great idea.
 (defn init-def
   "Internal, don't use."
@@ -83,10 +65,11 @@
   "def form for binding vars to GameObjects. Syntax is close to that of a defn, with
 zero or one arguments supported:
 
-(def car 
-  ([] (or (object-name \"the car\")
+(sv/def car 
+  ([] (or (object-named \"the car\")
           (let [car (create-primitive :cube)]
-            (set! (.name car) \"the car\"))))
+            (set! (.name car) \"the car\")
+            car)))
   ([car]
    (with-cmpt car [tr Transform]
      (set! (.position tr) (arcadia.linear/v3 0 2 10))
@@ -108,6 +91,9 @@ The 1-ary body, if supplied, mutates or replaces an existing value,
   by this def form *is* currently bound, the argument to the 1-ary
   body will be set to whatever that value is. The var will then be
   rebound to the return of the 1-ary body.
+
+If the var is bound to a null GameObject (one that has been destroyed,
+  for example), the 1-ary body will receive a nil argument.
 
 Another example:
 

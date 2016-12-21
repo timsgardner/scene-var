@@ -69,7 +69,7 @@ zero or one arguments supported:
      car)))
 
 The 0-ary body, if supplied, runs if the var bound by this def
-  form ('car', in the example above) is currently unbound, and should
+  form (#'car, in the example above) is currently unbound, and should
   return a GameObject. Use this to either find an object in the scene
   graph, or create a new object if there currently is none. This arity
   typically only runs once per session, it will be ignored on
@@ -80,7 +80,7 @@ The 1-ary body, if supplied, mutates or replaces an existing value,
   the var bound by this def form is currently unbound, the argument of
   the 1-ary body will be the return of the 0-ary body, if that is
   supplied, or nil if it is not. If, on the other hand, the var bound
-  by this def form *is* currently bound, the argument to the 1-ary
+  by this def form _is_ currently bound, the argument to the 1-ary
   body will be set to whatever that value is. The var will then be
   rebound to the return of the 1-ary body.
 

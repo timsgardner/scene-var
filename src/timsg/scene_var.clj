@@ -6,14 +6,6 @@
             [arcadia.internal.spec :as as])
   (:import [UnityEngine GameObject Component]))
 
-(defn- run-init [init-fn name]
-  (when-let [ent (init-fn)]
-    (when-not (instance? GameObject ent)
-      (throw
-        (Exception.
-          (str "Zero-argument arity of def, if present, must return a GameObject; instead getting a " (type ent)))))
-    ent))
-
 (s/def ::tail-impl
   (s/cat
     :args (s/and vector? #(#{0 1} (count %)))
@@ -65,7 +57,7 @@
   "def form for binding vars to GameObjects. Syntax is close to that of a defn, with
 zero or one arguments supported:
 
-(sv/def car 
+(def car 
   ([] (or (object-named \"the car\")
           (let [car (create-primitive :cube)]
             (set! (.name car) \"the car\")
@@ -97,9 +89,9 @@ If the var is bound to a null GameObject (one that has been destroyed,
 
 Another example:
 
-(def truck [x] ;; just the 1-ary body supplied
-  (when x (destroy x)) ;; whatever it is, get rid of it
-  (let [truck (create-primitive :cube)] ;; make a new one
+(def truck [x]                          ;; Just the 1-ary body supplied
+  (when x (destroy x))                  ;; Whatever it is, get rid of it
+  (let [truck (create-primitive :cube)] ;; Make a new one
     (set! (.name truck) \"truck\")
     (with-cmpt truck [tr Transform]
       (set! (.position tr) (arcadia.linear/v3 0 5 10))

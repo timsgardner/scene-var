@@ -1,4 +1,5 @@
 (ns timsg.scene-var
+  (:refer-clojure :exclude [def])
   (:use [arcadia.core])
   (:require [clojure.spec :as s]
             [clojure.core :as c]
@@ -62,17 +63,20 @@
           (str "Zero-argument arity of def-entity, if present, must return a GameObject; instead getting a " (type ent)))))
     ent))
 
+;; ==================================================
+;; never mind, just use a fucking var
 
-(defn init-entity [{:keys [name init update] :as init-spec}]
-  (-> (or (find-entity name)
-          (and init (run-init init name)))
+(defn init-entity [{:keys [kw init update] :as init-spec}]
+  (-> (or (find-entity kw)
+          (and init (run-init init kw)))
       (as-> ent
             (if update (update ent) ent)
-            (register-name ent name))))
-
+            (register-name ent kw))))
 
 ;; ============================================================
 ;; def-entity
+
+;; TODO: support for docs
 
 (s/def ::tail-impl
   (s/cat
@@ -90,7 +94,9 @@
   :args ::def-entity-args 
   :ret any?)
 
-(defmacro def-entity [& args]
+(def pdf-log (atom nil))
+
+(defn- parse-def-form [args]
   (as/qwik-conform [{:keys [name tails] :as spec} ::def-entity-args args]
     (let [qualified-name  (symbol
                             (c/name (ns-name *ns*))
@@ -105,12 +111,40 @@
                              0 :init
                              1 :update)]
                      [k `(fn ~args ~@tail)])))
-          init-spec (assoc fmap :name qualified-kw)]
-      `(do (init-entity ~init-spec)
-           (defn ~name ^GameObject []
-             (find-entity ~qualified-kw))))))
+          init-spec (assoc fmap
+                      :kw qualified-kw
+                      :name qualified-name)]
+      init-spec)))
 
+(defmacro def-entity [& args]
+  (let [{:keys [name qualified-kw] :as init-spec} (parse-def-form args)]
+    `(do (init-entity ~init-spec)
+         (defn ~name ^GameObject []
+           (find-entity ~qualified-kw)))))
 
+;; ============================================================
+;; much simpler way, just uses def and vars
+
+(defn init-def
+  "Returns nil if the referenced object is destroyed. Maybe that's not a great idea."
+  [{:keys [name init update]
+    :as init-spec}]
+  (-> (or (when-let [v (resolve name)] ;; name is fully qualified
+            (and (bound? v)
+                 (when-let [v (var-get v)]
+                   (if (instance? UnityEngine.Object v)
+                     (obj-nil v)
+                     v))))
+          (and init (init)))
+      (as-> ent
+            (if update (update ent) ent))))
+
+(defmacro def [& args]
+  (let [{:keys [name] :as init-spec} (parse-def-form args)]
+    `(let [x# (init-def  ~(update init-spec :name #(list 'quote %)))]
+       (def ~name x#))))
+
+;; ============================================================
 ;; desired:
 
 (comment

@@ -103,3 +103,40 @@ Another example:
   (let [{:keys [name] :as init-spec} (parse-def-form args)]
     `(let [x# (init-def  ~(update init-spec :name #(list 'quote %)))]
        (def ~name x#))))
+
+;; ============================================================
+
+(defn- full-name [named]
+  (cond
+    (keyword? named)
+    (let [^clojure.lang.Keyword kw named]
+      (if-let [ns (.getNamespace kw)]
+        (str ns "/" (name kw))
+        (name named)))
+
+    (symbol? named)
+    (let [^clojure.lang.Symbol sym named]
+      (if-let [ns (.getNamespace sym)]
+        (str ns "/" (name sym))
+        (name named)))
+
+    :else (name named)))
+
+;; (defn obtain
+;;   ([named]
+;;    (obtain named #(UnityEngine.GameObject.)))
+;;   ([named constructor]
+;;    (let [name (full-name named)]
+;;      (or (object-named name)
+;;          (let [^UnityEngine.GameObject obj (constructor)]
+;;            (set! (.name obj) name)
+;;            obj)))))
+
+;; (defmacro defobj [name constructor body]
+;;   (let [qname (with-meta (symbol (ns-name *ns*) name) {:tag 'UnityEngine.GameObject})]
+;;     `(def ~qname
+;;        ([] (obtain ~(clojure.core/name qname) #(~constructor)))
+;;        ~body)))
+
+
+;; ============================================================

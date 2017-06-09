@@ -51,13 +51,13 @@
 (defonce world-ref
   (atom (Registry. {} {})))
 
-(defn- obj->anchors []
+(defn- obj->anchors [obj]
   (let [^Registry world @world-ref]
-    (.obj->anchors world)))
+    (get (.obj->anchors world) x)))
 
-(defn- anchor->obj []
+(defn- anchor->obj [anchor]
   (let [^Registry world @world-ref]
-    (.anchor->obj world)))
+    (get (.anchor->obj world) anchor)))
 
 (defn gc []
   (swap! world-ref
@@ -109,10 +109,10 @@
 (defn sva-serialize [^SceneVarAnchor sva]
   (set! (.edn sva)
     (pr-str
-      (get (obj->anchors) sva))))
+      (obj->anchors sva))))
 
 (defn sva-destroy [^SceneVarAnchor sva]
-  (doseq [anchor (get (obj->anchors) sva)]
+  (doseq [anchor (obj->anchors sva)]
     (dissoc-anchor! anchor)))
 
 (defn sva-deserialize [^SceneVarAnchor sva]
@@ -141,7 +141,7 @@
   [{:keys [name kw init update]
     :as init-spec}]
   (let [anchor kw]
-    (-> (or (when-let [x (get (anchor->obj) anchor)]
+    (-> (or (when-let [x (anchor->obj anchor)]
               (if (null-obj? x)
                 (do (gc) ;; there shouldn't be any of these
                     nil)
@@ -161,5 +161,5 @@
          (defn ~name
            ([] (~name @world-ref))
            ([^timsg.scene_var.types.Registry world#]
-            (when-let [^SceneVarAnchor sva# (obj-nil (get (.anchor->obj world#) ~kw))]
+            (when-let [^SceneVarAnchor sva# (obj-nil (anchor->obj ~kw))]
               (.gameObject sva#)))))))

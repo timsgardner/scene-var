@@ -10,7 +10,10 @@ An (Arcadia)[https://github.com/arcadia-unity/Arcadia] library for interacting w
 
 `defgetter` defines getter functions for constructing, mutating, and retrieving individual GameObjects from the Unity scene graph.
 
+It establishes and maintains a live, serializable correspondence between the var named by `name` and an individual GameObject, and binds this var to a 0-ary getter function instance that will always return the currently-corresponding GameObject.
+
 The syntax is close to that of a defn, with bodies of 0 or 1 arguments supplied:
+
 ```clojure
 (defgetter the-floor
   ([]
@@ -21,6 +24,11 @@ The syntax is close to that of a defn, with bodies of 0 or 1 arguments supplied:
    (arcadia.core/with-cmpt floor [tr Transform]
      (set! (.position tr) (v3 0 -0.5 0))
      (set! (.localScale tr) (v3 1000 1 100)))))
+```
+Then:
+```
+(the-floor)
+;; => the floor GameObject
 ```
 Both arities only run when the `defgetter` form itself is evaluated (they are not the body of the produced getter function).
 

@@ -10,6 +10,9 @@ An (Arcadia)[https://github.com/arcadia-unity/Arcadia] library for interacting w
 
 `defgetter` defines getter functions for constructing, mutating, and retrieving individual GameObjects from the Unity scene graph.
 
+Syntax:
+`(defgetter name 0-ary-body? 1-ary-body?)`
+
 It establishes and maintains a live, serializable correspondence between the var named by `name` and an individual GameObject, and binds this var to a 0-ary getter function instance that will always return the currently-corresponding GameObject.
 
 The syntax is close to that of a defn, with bodies of 0 or 1 arguments supplied:

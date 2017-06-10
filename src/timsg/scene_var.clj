@@ -19,7 +19,7 @@
 
 (s/def ::def-entity-args
   (s/cat
-    :name (s/? symbol?)
+    :name symbol?
     :tails (s/alt
              :single-arity ::tail-impl
              :n-arities (s/* (s/spec ::tail-impl)))))
@@ -43,7 +43,6 @@
                       :kw qualified-kw
                       :name qualified-name)]
       init-spec)))
-
 
 ;; ============================================================
 ;; world and anchors

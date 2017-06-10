@@ -1,10 +1,16 @@
 (ns timsg.scene-var
-  (:refer-clojure :exclude [def])
   (:use [arcadia.core])
   (:require [clojure.spec :as s]
             [clojure.core :as c]
-            [arcadia.internal.spec :as as])
-  (:import [UnityEngine GameObject Component]))
+            [arcadia.internal.spec :as as]
+            [timsg.scene-var.types :as svt]
+            [arcadia.internal.map-utils :as mu]
+            [arcadia.internal.functions :as af])  
+  (:import [UnityEngine GameObject Component]
+           [timsg.scene_var.types Registry]
+           SceneVarAnchor))
+
+;; consider elevating this to the main file soon
 
 (s/def ::tail-impl
   (s/cat
@@ -13,7 +19,7 @@
 
 (s/def ::def-entity-args
   (s/cat
-    :name symbol?
+    :name (s/? symbol?)
     :tails (s/alt
              :single-arity ::tail-impl
              :n-arities (s/* (s/spec ::tail-impl)))))
@@ -38,105 +44,158 @@
                       :name qualified-name)]
       init-spec)))
 
-;; Returns nil if the referenced object is destroyed. Maybe that's not a great idea.
+
+;; ============================================================
+;; world and anchors
+
+(defonce world-ref
+  (atom (Registry. {} {})))
+
+(defn- obj->anchors [obj]
+  (let [^Registry world @world-ref]
+    (get (.obj->anchors world) x)))
+
+(defn- anchor->obj [anchor]
+  (let [^Registry world @world-ref]
+    (get (.anchor->obj world) anchor)))
+
+(defn gc []
+  (swap! world-ref
+    (fn [world]
+      (let [a->o (.anchor->obj world)
+            o->a (.obj->anchors world)]
+        (let [nulls (into []
+                      (filter null-obj?)
+                      (keys o->a))]
+          (Registry.
+            (persistent!
+              (transduce (mapcat o->a) (completing dissoc!) (transient a->o) nulls))
+            (persistent!
+              (reduce (completing dissoc!) (transient o->a) nulls))))))))
+
+(defn- assoc-anchor! [anchor obj]
+  (swap! world-ref
+    (fn [^Registry world]
+      (let [a->o (.anchor->obj world)
+            o->a (.obj->anchors world)]
+        (Registry.
+          (assoc a->o anchor obj)
+          (-> (if-let [old-obj (get a->o anchor)]
+                (dissoc o->a old-obj)
+                o->a)
+              (update obj
+                (fn [anchors]
+                  (conj (or anchors #{}) anchor)))))))))
+
+(defn- dissoc-anchor! [anchor]
+  (swap! world-ref
+    (fn [^Registry world]
+      (let [a->o (.anchor->obj world)
+            o->a (.obj->anchors world)]
+        (Registry.
+          (dissoc a->o anchor)
+          (if-let [obj (get a->o anchor)]
+            (let [anchors2 (disj (get o->a obj) anchor)]
+              (if-not (empty? anchors2)
+                (assoc o->a obj anchors2)
+                (dissoc o->a obj)))
+            o->a))))))
+
+;; ============================================================ most
+;; of the following assumes it's being done on main thread (since
+;; we're not using refs, and Unity won't let us do it elswhere anyway)
+
+;; could be faster
+(defn sva-serialize [^SceneVarAnchor sva]
+  (set! (.edn sva)
+    (pr-str
+      (obj->anchors sva))))
+
+(defn sva-destroy [^SceneVarAnchor sva]
+  (doseq [anchor (obj->anchors sva)]
+    (dissoc-anchor! anchor)))
+
+(defn sva-deserialize [^SceneVarAnchor sva]
+  (let [world @world-ref
+        anchors (read-string (.edn sva))]
+    (doseq [anchor anchors]
+      (if-not (contains? world anchor)
+        (assoc-anchor! anchor sva)))))
+
+;; all on main thread
+(defn- add-anchor [^SceneVarAnchor sva, anchor]
+  (assoc-anchor! anchor sva))
+
+(defn ensure-anchor [^UnityEngine.GameObject obj, anchor]
+  (let [^SceneVarAnchor sva (or (obj-nil (.GetComponent obj SceneVarAnchor))
+                                (.AddComponent obj SceneVarAnchor))]
+    (add-anchor sva anchor)
+    obj))
+
+;; ==================================================
+;; initialization 
+
+;; gotta happen on main thread!
 (defn init-def
   "Internal, don't use."
-  [{:keys [name init update]
+  [{:keys [name kw init update]
     :as init-spec}]
-  (-> (or (when-let [v (resolve name)] ;; name is fully qualified
-            (and (bound? v)
-                 (when-let [v (var-get v)]
-                   (if (instance? UnityEngine.Object v)
-                     (obj-nil v)
-                     v))))
-          (and init (init)))
-      (as-> ent
-            (if update (update ent) ent))))
+  (let [anchor kw]
+    (-> (or (when-let [x (anchor->obj anchor)]
+              (if (null-obj? x)
+                (do (gc) ;; there shouldn't be any of these
+                    nil)
+                (gobj x)))
+            (and init (init)))
+        (as-> ent
+              (if update (update ent) ent))
+        (ensure-anchor anchor) ;; logic in here will force main thread, I think
+        )))
 
-(defmacro def
-  "def form for binding vars to GameObjects. Syntax is close to that of a defn, with
-zero or one arguments supported:
+(defmacro getter [anchor & args])
 
-(def car 
-  ([] (or (object-named \"the car\")
-          (let [car (create-primitive :cube)]
-            (set! (.name car) \"the car\")
-            car)))
-  ([car]
-   (with-cmpt car [tr Transform]
-     (set! (.position tr) (arcadia.linear/v3 0 2 10))
-     (set! (.rotation tr) (arcadia.linear/aa 90 0 1 0))
-     car)))
+;; to def and get an object from the scene
+(defmacro defgetter
+  "(defgetter name 0-ary-body? 1-ary-body?)
 
-The 0-ary body, if supplied, runs if the var bound by this def
-  form (#'car, in the example above) is currently unbound, and should
-  return a GameObject. Use this to either find an object in the scene
-  graph, or create a new object if there currently is none. This arity
-  typically only runs once per session, it will be ignored on
-  subsequent redefs.
+  def form for defining GameObject getter functions that reach into the Unity scene graph.
 
-The 1-ary body, if supplied, mutates or replaces an existing value,
-  and is where most of the work of redefinition should take place. If
-  the var bound by this def form is currently unbound, the argument of
-  the 1-ary body will be the return of the 0-ary body, if that is
-  supplied, or nil if it is not. If, on the other hand, the var bound
-  by this def form _is_ currently bound, the argument to the 1-ary
-  body will be set to whatever that value is. The var will then be
-  rebound to the return of the 1-ary body.
+  Establishes and maintains a live, serializable correspondence between the var named by `name` and an individual GameObject, and binds this var to a 0-ary getter function instance that will always return the currently-corresponding GameObject. 
 
-If the var is bound to a null GameObject (one that has been destroyed,
-  for example), the 1-ary body will receive a nil argument.
+  The syntax is close to that of a defn, with bodies of 0 or 1 arguments supported:
 
-Another example:
+  (defgetter the-floor
+    ([]
+     (let [floor (arcadia.core/create-primitive :cube)]
+       (set! (.name floor) \"the-floor\")
+       floor))
+    ([floor]
+     (arcadia.core/with-cmpt floor [tr Transform]
+       (set! (.position tr) (v3 0 -0.5 0))
+       (set! (.localScale tr) (v3 1000 1 100)))))
 
-(def truck [x]                          ;; Just the 1-ary body supplied
-  (when x (destroy x))                  ;; Whatever it is, get rid of it
-  (let [truck (create-primitive :cube)] ;; Make a new one
-    (set! (.name truck) \"truck\")
-    (with-cmpt truck [tr Transform]
-      (set! (.position tr) (arcadia.linear/v3 0 5 10))
-      (set! (.rotation tr) (arcadia.linear/aa 45 0 1 0))
-      (set! (.localScale tr) (arcadia.linear/v3 1 2 4)))
-    truck))
-"
+  Both arities only run when the `defgetter` form itself is evaluated (they are not the body of the produced getter function).
+
+  The 0-ary body is useful for constructing GameObject, the 1-ary body is body is useful for mutating existing GameObjects or changing the association to a different GameObject.
+
+  0-ary-body:
+  ([] exprs*)
+
+  The 0-ary body, if supplied, runs only if the var bound by this def form (#'car, in the example above) is currently not associated with a live GameObject, and should return a GameObject (an error is thrown if it does not). The var will then be associated with the returned GameObject. This arity can be used to create a new GameObject, or to find one already in the scene.
+
+  1-ary-body:
+  ([obj] exprs*)
+
+  The 1-ary body, if supplied, runs whenever the `defgetter` form is evaluated (just after the 0-ary body, if it is present). `obj` is the GameObject currently associated with the var, or `nil` if no such var exists.
+
+  If the 1-ary body returns a GameObject, the var will be associated with that GameObject. If it does not, or if an error is thrown in `exprs*`, the var will remain associated with `obj`.
+
+  After `defgetter` is evaluated, the var `name` will be bound to a getter function that will return the GameObject associated with `name`, or `nil` if no such GameObject exists. If the GameObject associatd with `name` changes, the getter function will subsequently return that new GameObject."
   [& args]
-  (let [{:keys [name] :as init-spec} (parse-def-form args)]
-    `(let [x# (init-def  ~(update init-spec :name #(list 'quote %)))]
-       (def ~name x#))))
-
-;; ============================================================
-
-(defn- full-name [named]
-  (cond
-    (keyword? named)
-    (let [^clojure.lang.Keyword kw named]
-      (if-let [ns (.getNamespace kw)]
-        (str ns "/" (name kw))
-        (name named)))
-
-    (symbol? named)
-    (let [^clojure.lang.Symbol sym named]
-      (if-let [ns (.getNamespace sym)]
-        (str ns "/" (name sym))
-        (name named)))
-
-    :else (name named)))
-
-;; (defn obtain
-;;   ([named]
-;;    (obtain named #(UnityEngine.GameObject.)))
-;;   ([named constructor]
-;;    (let [name (full-name named)]
-;;      (or (object-named name)
-;;          (let [^UnityEngine.GameObject obj (constructor)]
-;;            (set! (.name obj) name)
-;;            obj)))))
-
-;; (defmacro defobj [name constructor body]
-;;   (let [qname (with-meta (symbol (ns-name *ns*) name) {:tag 'UnityEngine.GameObject})]
-;;     `(def ~qname
-;;        ([] (obtain ~(clojure.core/name qname) #(~constructor)))
-;;        ~body)))
-
-
-;; ============================================================
+  (let [{:keys [name kw] :as init-spec} (parse-def-form args)]
+    `(do (init-def ~(update init-spec :name #(list 'quote %)))
+         (defn ^UnityEngine.GameObject ~name
+           ([] (~name @world-ref))
+           ([^timsg.scene_var.types.Registry world#]
+            (when-let [^SceneVarAnchor sva# (obj-nil (anchor->obj ~kw))]
+              (.gameObject sva#)))))))

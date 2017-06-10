@@ -21,7 +21,7 @@ The syntax is close to that of a defn, with bodies of 0 or 1 arguments supplied:
 (defgetter the-floor
   ([]
    (let [floor (arcadia.core/create-primitive :cube)]
-     (set! (.name floor) \"the-floor\")
+     (set! (.name floor) "the-floor")
      floor))
   ([floor]
    (arcadia.core/with-cmpt floor [tr Transform]

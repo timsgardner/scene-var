@@ -51,11 +51,11 @@
 (defonce world-ref
   (atom (Registry. {} {})))
 
-(defn- obj->anchors [obj]
+(defn obj->anchors [obj]
   (let [^Registry world @world-ref]
-    (get (.obj->anchors world) x)))
+    (get (.obj->anchors world) obj)))
 
-(defn- anchor->obj [anchor]
+(defn anchor->obj [anchor]
   (let [^Registry world @world-ref]
     (get (.anchor->obj world) anchor)))
 
@@ -133,26 +133,65 @@
     obj))
 
 ;; ==================================================
-;; initialization 
+;; initialization
+
+(defn- game-object? [x]
+  (instance? UnityEngine.GameObject x))
+
+(defn- run-update [update-fn obj]
+  (when update-fn
+    (try
+      (update-fn obj)
+      (catch Exception e
+        (UnityEngine.Debug/Log
+          (str "Exception encountered in defgetter for " name "."))
+        (UnityEngine.Debug/Log e)
+        nil))))
+
+(defn- run-init [init-fn]
+  (when init-fn
+    (let [obj (init-fn)]
+      ;; Test that we in fact have a GameObject.
+      (when-not (game-object? obj)
+        (throw (Exception.
+                 (str
+                   "0-arity defgetter body must return instance of UnityEngine.GameObject. "
+                   "Instead returning instance of class: " (pr-str (class obj))))))
+      obj)))
 
 ;; gotta happen on main thread!
 (defn init-def
   "Internal, don't use."
-  [{:keys [name kw init update]
+  [{:keys [name kw init]
+    update-fn :update
     :as init-spec}]
-  (let [anchor kw]
-    (-> (or (when-let [x (anchor->obj anchor)]
-              (if (null-obj? x)
-                (do (gc) ;; there shouldn't be any of these
-                    nil)
-                (gobj x)))
-            (and init (init)))
-        (as-> ent
-              (if update (update ent) ent))
-        (ensure-anchor anchor) ;; logic in here will force main thread, I think
-        )))
+  (let [anchor kw
+        ;; If an existing GameObject corresponds to this anchor, get
+        ;; it. If not, construct it.
+        existing-obj (or (when-let [x (anchor->obj anchor)]
+                           (if (null-obj? x)
+                             (do (gc) ;; there shouldn't be any of these
+                                 nil)
+                             (gobj x)))
+                         (run-init init))]    
+    ;; If it isn't nil, make it correspond to the anchor.
+    (when-not (nil? existing-obj)
+      (ensure-anchor existing-obj anchor))
+    ;; If the 1-ary update body to defgetter is defined, run it on the GameObject now.
+    (if update-fn
+      (let [updated-obj (run-update update-fn existing-obj)]
+        (cond
+          (game-object? updated-obj)
+          (ensure-anchor updated-obj anchor)
+          
+          (nil? init)
+          (throw (Exception.
+                   (str "0-ary body of defgetter is not provided, and 1-ary body of "
+                        "defgetter does not return GameObject instance. Instead returns "
+                        "instance of: " (pr-str (class updated-obj)))))
 
-(defmacro getter [anchor & args])
+          :else existing-obj))
+      existing-obj)))
 
 ;; to def and get an object from the scene
 (defmacro defgetter

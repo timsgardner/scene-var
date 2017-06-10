@@ -33,7 +33,7 @@ public class SceneVarAnchor : UnityEngine.MonoBehaviour, UnityEngine.ISerializat
 
 	private static void initializeVars ()
 	{
-		string nsStr = "timsg.scene-var.get";
+		string nsStr = "timsg.scene-var";
 		require(nsStr);
 		if (beforeSerializeFn == null)
 			beforeSerializeFn = RT.var(nsStr, "sva-serialize");

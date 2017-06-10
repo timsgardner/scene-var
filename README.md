@@ -1,6 +1,6 @@
 # timsg.scene-var
 
-An (Arcadia)[https://github.com/arcadia-unity/Arcadia] library for interacting with the Unity scene graph.
+An [Arcadia](https://github.com/arcadia-unity/Arcadia) library for interacting with the Unity scene graph.
 
 ## Clojars
 

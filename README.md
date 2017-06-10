@@ -38,7 +38,7 @@ Both arities only run when the `defgetter` form itself is evaluated (they are no
 The 0-ary body is useful for constructing GameObject, the 1-ary body is body is useful for mutating existing GameObjects or changing the association to a different GameObject.
 
 ### 0-ary body
-`([obj] exprs*)`
+`([] exprs*)`
 
 The 0-ary body, if supplied, runs only if the var bound by this def form (#'car, in the example above) is currently not associated with a live GameObject, and should return a GameObject (an error is thrown if it does not). The var will then be associated with the returned GameObject. This arity can be used to create a new GameObject, or to find one already in the scene.
 

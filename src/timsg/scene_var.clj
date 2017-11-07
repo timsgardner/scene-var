@@ -20,7 +20,7 @@
 (s/def ::def-entity-args
   (s/cat
     :name symbol?
-    :scenes (s/? (s/coll-of string? :kind vector?))
+    :scenes (s/? vector)
     :tails (s/alt
              :single-arity ::tail-impl
              :n-arities (s/* (s/spec ::tail-impl)))))

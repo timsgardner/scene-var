@@ -20,12 +20,13 @@
 (s/def ::def-entity-args
   (s/cat
     :name symbol?
+    :scenes (s/? (s/coll-of string? :kind vector?))
     :tails (s/alt
              :single-arity ::tail-impl
              :n-arities (s/* (s/spec ::tail-impl)))))
 
 (defn- parse-def-form [args]
-  (as/qwik-conform [{:keys [name tails] :as spec} ::def-entity-args args]
+  (as/qwik-conform [{:keys [name tails scenes] :as spec} ::def-entity-args args]
     (let [qualified-name  (symbol
                             (c/name (ns-name *ns*))
                             (c/name name))
@@ -40,6 +41,7 @@
                              1 :update)]
                      [k `(fn ~args ~@tail)])))
           init-spec (assoc fmap
+                      :scenes (or scenes :all)
                       :kw qualified-kw
                       :name qualified-name)]
       init-spec)))
@@ -158,39 +160,49 @@
                    "Instead returning instance of class: " (pr-str (class obj))))))
       obj)))
 
+(defn current-scene? [scenes]
+  (or (= scenes :all) ;; the default if no scenes specified
+      (let [this-scene (.name (UnityEngine.SceneManagement.SceneManager/GetActiveScene))]
+        (some #(cond (string? %) (= % this-scene)
+                     (instance? System.Text.RegularExpressions.Regex %) (re-matches % this-scene)
+                     :else false)
+          scenes))))
+
 ;; gotta happen on main thread!
 (defn init-def
   "Internal, don't use."
-  [{:keys [name kw init]
+  [{:keys [name kw init scenes]
     update-fn :update
     :as init-spec}]
-  (let [anchor kw
-        ;; If an existing GameObject corresponds to this anchor, get
-        ;; it. If not, construct it.
-        existing-obj (or (when-let [x (anchor->obj anchor)]
-                           (if (null-obj? x)
-                             (do (gc) ;; there shouldn't be any of these
-                                 nil)
-                             (gobj x)))
-                         (run-init init))]    
-    ;; If it isn't nil, make it correspond to the anchor.
-    (when-not (nil? existing-obj)
-      (ensure-anchor existing-obj anchor))
-    ;; If the 1-ary update body to defgetter is defined, run it on the GameObject now.
-    (if update-fn
-      (let [updated-obj (run-update update-fn existing-obj)]
-        (cond
-          (game-object? updated-obj)
-          (ensure-anchor updated-obj anchor)
-          
-          (nil? init)
-          (throw (Exception.
-                   (str "0-ary body of defgetter is not provided, and 1-ary body of "
-                        "defgetter does not return GameObject instance. Instead returns "
-                        "instance of: " (pr-str (class updated-obj)))))
+  ;; short-circuit if this is the wrong scene
+  (when (current-scene? scenes)
+    (let [anchor kw
+          ;; If an existing GameObject corresponds to this anchor, get
+          ;; it. If not, construct it.
+          existing-obj (or (when-let [x (anchor->obj anchor)]
+                             (if (null-obj? x)
+                               (do (gc) ;; there shouldn't be any of these
+                                   nil)
+                               (gobj x)))
+                           (run-init init))]    
+      ;; If it isn't nil, make it correspond to the anchor.
+      (when-not (nil? existing-obj)
+        (ensure-anchor existing-obj anchor))
+      ;; If the 1-ary update body to defgetter is defined, run it on the GameObject now.
+      (if update-fn
+        (let [updated-obj (run-update update-fn existing-obj)]
+          (cond
+            (game-object? updated-obj)
+            (ensure-anchor updated-obj anchor)
+            
+            (nil? init)
+            (throw (Exception.
+                     (str "0-ary body of defgetter is not provided, and 1-ary body of "
+                          "defgetter does not return GameObject instance. Instead returns "
+                          "instance of: " (pr-str (class updated-obj)))))
 
-          :else existing-obj))
-      existing-obj)))
+            :else existing-obj))
+        existing-obj))))
 
 ;; to def and get an object from the scene
 (defmacro defgetter
@@ -230,7 +242,7 @@
 
   After `defgetter` is evaluated, the var `name` will be bound to a getter function that will return the GameObject associated with `name`, or `nil` if no such GameObject exists. If the GameObject associatd with `name` changes, the getter function will subsequently return that new GameObject."
   [& args]
-  (let [{:keys [name kw] :as init-spec} (parse-def-form args)]
+  (let [{:keys [name kw scenes] :as init-spec} (parse-def-form args)]
     `(do (init-def ~(update init-spec :name #(list 'quote %)))
          (defn ^UnityEngine.GameObject ~name
            ([] (~name @world-ref))
